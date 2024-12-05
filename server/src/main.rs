@@ -5,11 +5,13 @@ use std::thread;
 use std::env;
 
 const BOARD_SIZE : usize = 3;
+const EMPTY_SPACE : char = '-';
 
 struct Game
 {
 	board: [ [char; BOARD_SIZE]; BOARD_SIZE ],
 	current_player: char,
+	round_number: usize,
 }
 
 impl Game
@@ -18,53 +20,56 @@ impl Game
 	{
 		Game
 		{
-			board: [[' '; BOARD_SIZE]; BOARD_SIZE],
+			board: [[EMPTY_SPACE; BOARD_SIZE]; BOARD_SIZE],
 			current_player: 'X',
+			round_number: 0,
 		}
 	}
 
 	fn print_board(&self)
 	{
+		println!("Round {}", self.round_number % 2);
 		for row in &self.board
 		{
 			println!("{}", row.iter().collect::<String>());
 		}
+		println!("\n\n");
 	}
 
 	fn make_move(&mut self, row: usize, col: usize) -> bool
 	{
-		if self.board[row][col] == ' '
+		if self.board[row][col] == EMPTY_SPACE
 		{
 			self.board[row][col] = self.current_player;
 			self.current_player = if self.current_player == 'X' { 'O' } else { 'X' };
 
+			self.round_number += 1;
+
 			return true
 		}
-		else 
-		{
-			return false
-		}
+		
+		return false
 	}
 
 	fn check_winner(&self) -> Option<char>
 	{
 		for i in 0..BOARD_SIZE
 		{
-			if self.board[i][0] != ' ' && self.board[i][0] == self.board[i][1] && self.board[i][1] == self.board[i][2]
+			if self.board[i][0] != EMPTY_SPACE && self.board[i][0] == self.board[i][1] && self.board[i][1] == self.board[i][2]
 			{
 				return Some(self.board[i][0]);
 			}
-			if self.board[0][i] != ' ' && self.board[0][i] == self.board[1][i] && self.board[1][i] == self.board[2][i]
+			if self.board[0][i] != EMPTY_SPACE && self.board[0][i] == self.board[1][i] && self.board[1][i] == self.board[2][i]
 			{
 				return Some(self.board[0][i]);
 			}
 		}
 
-		if self.board[0][0] != ' ' && self.board[0][0] == self.board[1][1] && self.board[1][1] == self.board[2][2]
+		if self.board[0][0] != EMPTY_SPACE && self.board[0][0] == self.board[1][1] && self.board[1][1] == self.board[2][2]
 		{
 			return Some(self.board[0][0]);
 		}
-		if self.board[0][2] != ' ' && self.board[0][2] == self.board[1][1] && self.board[1][1] == self.board[2][0]
+		if self.board[0][2] != EMPTY_SPACE && self.board[0][2] == self.board[1][1] && self.board[1][1] == self.board[2][0]
 		{
 			return Some(self.board[0][2]);
 		}
@@ -112,7 +117,8 @@ fn handle_client(stream: TcpStream, game: Arc<Mutex<Game>>, player: char)
 		{
 			game.print_board();
 			writeln!(writer, "Player {} wins!", winner).unwrap();
-			break;
+			println!("Player {} wins!", winner);
+			std::process::exit(0);
 		}
 	}
 }
@@ -145,6 +151,7 @@ fn main()
 
 		if player_count > 2
 		{
+			println!("Only 2 players can play...");
 			break;
 		}
 	}
