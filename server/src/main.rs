@@ -75,6 +75,8 @@ impl Game
 
 fn handle_client(stream: TcpStream, game: Arc<Mutex<Game>>, player: char)
 {
+	println!("[Server] Player {player} connected");
+
 	let mut reader = io::BufReader::new(stream.try_clone().unwrap());
 	let mut writer = stream;
 
@@ -141,7 +143,7 @@ fn main()
 			handle_client(stream, game_clone, player);
 		});
 
-		if player_count == 2
+		if player_count > 2
 		{
 			break;
 		}
