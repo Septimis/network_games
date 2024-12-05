@@ -1,199 +1,149 @@
-use std::collections::HashMap;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, Write, BufRead};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::env;
 
-#[derive(Debug)]
-struct GameRoom
+const BOARD_SIZE : usize = 3;
+
+struct Game
 {
-	name: String,
-	game_type: String,
-	player1: Option<TcpStream>,
-	player2: Option<TcpStream>,
+	board: [ [char; BOARD_SIZE]; BOARD_SIZE ],
+	current_player: char,
 }
 
-#[derive(Clone)]
-struct Server
-{
-	rooms: Arc<Mutex<HashMap<String, GameRoom>>>,
-}
-
-impl Server
+impl Game
 {
 	fn new() -> Self
 	{
-		Server
+		Game
 		{
-			rooms: Arc::new(Mutex::new(HashMap::new())),
+			board: [[' '; BOARD_SIZE]; BOARD_SIZE],
+			current_player: 'X',
 		}
 	}
 
-	fn handle_client(&self, mut stream : TcpStream)
+	fn print_board(&self)
 	{
-		log("Server", format!("Client connected\n\t{}", stream.peer_addr().unwrap().to_string()));
-
-		let mut reader : BufReader<TcpStream> = io::BufReader::new(stream.try_clone().unwrap());
-		let mut buffer = String::new();
-
-		loop
+		for row in &self.board
 		{
-			buffer.clear();
-			buffer.push_str("Choose from the following options:\n\t1) Create new room\n\t2) Join existing room\n\t3) Exit\n");
-			stream.write_all(buffer.as_bytes()).unwrap();
-			stream.flush().expect("msg");
-			log("Server", format!("{}", &buffer));
-
-			buffer.clear();
-			reader.read_line(&mut buffer).unwrap();
-			log("Client", format!("{}", &buffer));
-			match buffer.trim()
-			{
-				"1" => self.create_game_room(&mut stream).unwrap(),
-				"2" => self.join_game_room(&mut stream).unwrap(),
-				"3" => {
-					log("Server", "Ending connection".to_string());
-					break;
-				}
-				_ => {
-					stream.write_all(b"Invalid option. Please try again.\n").unwrap();
-					log("Server", format!("Invalid option. Please try again."));
-				}
-			}
+			println!("{}", row.iter().collect::<String>());
 		}
 	}
 
-	fn create_game_room(&self, stream: &mut TcpStream) -> io::Result<()>
+	fn make_move(&mut self, row: usize, col: usize) -> bool
 	{
-		log("Server", "Starting the 'create game room' process...".to_string());
-
-		let mut reader : BufReader<TcpStream> = io::BufReader::new(stream.try_clone().unwrap());
-		let mut buffer : String = String::new();
-
-		stream.write_all(b"Enter game room name: ")?;
-		stream.flush()?;
-		log("Server", "Enter game room name: ".to_string());
-
-		reader.read_line(&mut buffer)?;
-		let room_name = buffer.trim().to_string();
-		buffer.clear();
-
-		let mut game_type : String = String::new();
-		while String::is_empty(&game_type)
+		if self.board[row][col] == ' '
 		{
-			stream.write_all(b"Choose game type (Tic Tac Toe / Connect 4): ")?;
-			stream.flush()?;
-			reader.read_line(&mut buffer)?;
+			self.board[row][col] = self.current_player;
+			self.current_player = if self.current_player == 'X' { 'O' } else { 'X' };
 
-			game_type = match buffer.trim()
-			{
-				"1" => "Tic Tac Toe".to_string(),
-				"2" => "Connect 4".to_string(),
-				_ => {
-					stream.write_all(b"Invalid option... Please type the corresponding number...\n").unwrap();
-					"".to_string()
-				}
-			}
+			return true
 		}
-
-		let mut rooms : std::sync::MutexGuard<'_, HashMap<String, GameRoom>> = self.rooms.lock().unwrap();
-		rooms.insert(
-			room_name.clone(),
-			GameRoom
-			{
-				name : room_name.clone(),
-				game_type,
-				player1 : Some(stream.try_clone().unwrap()),
-				player2 : None,
-			},
-		);
-
-		stream.write_all(b"Game room created. Waiting for a second player...\n")?;
-		// Wait for a second player to join
-		while let Some(room) = rooms.get_mut(&room_name)
+		else 
 		{
-			if room.player2.is_none()
-			{
-				// Wait for another client to join
-				// This part can be improved with a more sophisticated approach
-				// For simplicity, we will just return here
-				return Ok(());
-			}
+			return false
 		}
-
-		Ok(())
 	}
 
-	fn join_game_room(&self, stream: &mut TcpStream) -> io::Result<()>
+	fn check_winner(&self) -> Option<char>
 	{
-		let mut buffer : String = String::new();
-		let mut reader : BufReader<TcpStream> = io::BufReader::new(stream.try_clone().unwrap());
-
-		stream.write_all(b"Enter game room name: ")?;
-		stream.flush()?;
-		reader.read_line(&mut buffer)?;
-		let room_name : String = buffer.trim().to_string();
-
-		let mut rooms = self.rooms.lock().unwrap();
-		if let Some(room) = rooms.get_mut(&room_name)
+		for i in 0..BOARD_SIZE
 		{
-			if room.player2.is_none()
+			if self.board[i][0] != ' ' && self.board[i][0] == self.board[i][1] && self.board[i][1] == self.board[i][2]
 			{
-				room.player2 = Some(stream.try_clone().unwrap());
-				stream.write_all(b"You have joined the game room.\n")?;
-				// Start the game logic here
+				return Some(self.board[i][0]);
 			}
-			else
+			if self.board[0][i] != ' ' && self.board[0][i] == self.board[1][i] && self.board[1][i] == self.board[2][i]
 			{
-				stream.write_all(b"Game room is full.\n")?;
+				return Some(self.board[0][i]);
 			}
 		}
-		else
+
+		if self.board[0][0] != ' ' && self.board[0][0] == self.board[1][1] && self.board[1][1] == self.board[2][2]
 		{
-			stream.write_all(b"Game room does not exist.\n")?;
+			return Some(self.board[0][0]);
+		}
+		if self.board[0][2] != ' ' && self.board[0][2] == self.board[1][1] && self.board[1][1] == self.board[2][0]
+		{
+			return Some(self.board[0][2]);
 		}
 
-		Ok(())
+		return None
+	}
+}
+
+fn handle_client(stream: TcpStream, game: Arc<Mutex<Game>>, player: char)
+{
+	let mut reader = io::BufReader::new(stream.try_clone().unwrap());
+	let mut writer = stream;
+
+	loop
+	{
+		{
+			let game = game.lock().unwrap();
+			game.print_board();
+			writeln!(writer, "Player {}, enter your move (row and column): ", player).unwrap();
+			writer.flush().unwrap();
+		}
+
+		let mut input = String::new();
+		reader.read_line(&mut input).unwrap();
+		let coords: Vec<usize> = input.trim().split_whitespace()
+			.filter_map(|s| s.parse().ok()).collect();
+
+		if coords.len() != 2
+		{
+			writeln!(writer, "Invalid input. Please enter row and column.").unwrap();
+			continue;
+		}
+
+		let (row, col) = (coords[0], coords[1]);
+		let mut game = game.lock().unwrap();
+		if row >= BOARD_SIZE || col >= BOARD_SIZE || !game.make_move(row, col)
+		{
+			writeln!(writer, "Invalid move. Try again.").unwrap();
+			continue;
+		}
+
+		if let Some(winner) = game.check_winner()
+		{
+			game.print_board();
+			writeln!(writer, "Player {} wins!", winner).unwrap();
+			break;
+		}
 	}
 }
 
 fn main()
 {
-	let args : Vec<String> = std::env::args().collect();
+	let args : Vec<String> = env::args().collect();
 	if args.len() != 3
 	{
-		panic!("Invalid arguments!\n\tUse: [Server IP address] [Port Number]");
+		panic!("Invalid arguments!\n\tUse [ip address] [port number]");
 	}
 
 	let ip_address : &str = &args[1];
 	let port_number : &str = &args[2];
 
-	let server : Server = Server::new();
-	let listener : TcpListener = TcpListener::bind(format!("{}:{}", ip_address, port_number)).unwrap();
-	println!("Server running on {}:{}", ip_address, port_number);
+	let listener = TcpListener::bind(format!("{}:{}", ip_address, port_number)).unwrap();
+	let game = Arc::new(Mutex::new(Game::new()));
+	let mut player_count = 0;
 
 	for stream in listener.incoming()
 	{
-		match stream
+		let stream = stream.unwrap();
+		let player = if player_count % 2 == 0 { 'X' } else { 'O' };
+		player_count += 1;
+
+		let game_clone = Arc::clone(&game);
+		thread::spawn(move || {
+			handle_client(stream, game_clone, player);
+		});
+
+		if player_count == 2
 		{
-			Ok(stream) =>
-			{
-				let server : Server = server.clone();
-				thread::spawn(move ||
-				{
-					server.handle_client(stream);
-				});
-			}
-			Err(e) =>
-			{
-				eprintln!("Error : {}", e);
-			}
+			break;
 		}
 	}
-}
-
-fn log(owner : &str, log : String)
-{
-	println!("[{}] {}", owner, log);
 }
